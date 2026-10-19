@@ -252,6 +252,45 @@ describe("third-party license generation", () => {
     });
   });
 
+  it("skips dependencies pnpm did not install even when they resolve through its hoist", async () => {
+    const fixture = await createFixture();
+    const store = NodePath.join(fixture.root, "node_modules", ".pnpm");
+    const parentRoot = NodePath.join(store, "parent@1.0.0", "node_modules", "parent");
+    const removedRoot = NodePath.join(store, "removed@1.0.0", "node_modules", "removed");
+    await writeJson(fixture.appManifest, {
+      name: "fixture-app",
+      dependencies: { parent: "1.0.0" },
+    });
+    await writeJson(NodePath.join(parentRoot, "package.json"), {
+      name: "parent",
+      version: "1.0.0",
+      license: "MIT",
+      dependencies: { removed: "1.0.0" },
+    });
+    await NodeFSP.writeFile(NodePath.join(parentRoot, "LICENSE"), "Parent license\n", "utf8");
+    // No notice text: generation fails if this package is collected.
+    await writeJson(NodePath.join(removedRoot, "package.json"), {
+      name: "removed",
+      version: "1.0.0",
+    });
+    await NodeFSP.mkdir(NodePath.join(store, "node_modules"), { recursive: true });
+    await NodeFSP.symlink(removedRoot, NodePath.join(store, "node_modules", "removed"), "junction");
+    await NodeFSP.symlink(
+      parentRoot,
+      NodePath.join(fixture.root, "node_modules", "parent"),
+      "junction",
+    );
+
+    const manifest = await generateThirdPartyLicenseManifest({
+      configFile: fixture.configFile,
+      packageManifests: [{ bundle: "web", path: fixture.appManifest }],
+    });
+
+    expect(
+      manifest.entries.filter((entry) => entry.kind === "package").map((entry) => entry.name),
+    ).toEqual(["parent"]);
+  });
+
   it("renders generated notices from the ignored SPDX cache", async () => {
     const fixture = await createFixture();
     await writeJson(

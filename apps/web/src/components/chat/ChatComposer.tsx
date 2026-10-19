@@ -271,6 +271,7 @@ import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
+import { ComposerVoiceInputButton } from "./ComposerVoiceInputButton";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
@@ -1091,6 +1092,11 @@ import {
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "@t3tools/shared/proposedPlanText";
+import {
+  voiceInputFreezesEditor,
+  type VoiceDraftSnapshot,
+} from "@t3tools/client-runtime/voice-input";
+import { diffTextRange, useComposerVoiceInput } from "~/voiceInput/useComposerVoiceInput";
 import { hasProviderSetup } from "./ProviderStatusBanner";
 import {
   applyProviderInstanceSettings,
@@ -1470,6 +1476,10 @@ export interface ChatComposerHandle {
   toggleModelPicker: () => void;
   openControl: (command: KeybindingCommand) => void;
   isModelPickerOpen: () => boolean;
+  /** Start dictation, or stop and transcribe the running recording. */
+  toggleVoiceInput: () => void;
+  /** True from the moment dictation starts until its transcript lands. */
+  isVoiceInputActive: () => boolean;
   /** True when a collapsed caret sits before everything in the draft, including when it is empty. */
   isCaretAtStart: () => boolean;
   compactContext: () => void;
@@ -4001,6 +4011,72 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       contextIds: isLiteralPendingAnswer ? [] : collectInlineContextIds(promptRef.current),
     };
   }, [composerCursor, isLiteralPendingAnswer, promptRef]);
+
+  // ------------------------------------------------------------------
+  // Voice input
+  // ------------------------------------------------------------------
+  const composerEditorUnavailable =
+    isConnecting ||
+    isComposerApprovalState ||
+    projectSelectionRequired ||
+    isChoiceOnlyPendingQuestion ||
+    activePendingIsResponding;
+  const voiceOwnerKey = `${composerDraftTargetKey}:${activePendingProgress?.activeQuestion?.id ?? ""}`;
+  const readVoiceDraft = useCallback((): VoiceDraftSnapshot | null => {
+    if (composerEditorUnavailable) return null;
+    const snapshot = readComposerSnapshot();
+    return {
+      ownerKey: voiceOwnerKey,
+      text: snapshot.value,
+      selection: { start: snapshot.expandedCursor, end: snapshot.expandedCursor },
+      // The editor is frozen while voice input runs, so the text alone tells a stale draft.
+      revision: 0,
+    };
+  }, [composerEditorUnavailable, readComposerSnapshot, voiceOwnerKey]);
+  const commitVoiceDraft = useCallback(
+    (text: string, selection: { readonly start: number }) => {
+      const edit = diffTextRange(promptRef.current, text);
+      applyPromptReplacement(edit.start, edit.end, edit.replacement, {
+        expandedCursorAfterReplace: selection.start,
+        focusEditorAfterReplace: false,
+      });
+    },
+    [applyPromptReplacement, promptRef],
+  );
+  const voiceInput = useComposerVoiceInput({
+    ownerKey: voiceOwnerKey,
+    readDraft: readVoiceDraft,
+    commitDraft: commitVoiceDraft,
+  });
+  const voiceInputFrozen = voiceInputFreezesEditor(voiceInput.state);
+  const showVoiceInputAction = voiceInput.supported && !composerEditorUnavailable;
+  const toggleVoiceInput = voiceInput.toggle;
+  const cancelVoiceInput = voiceInput.cancel;
+  // An approval or question can replace the editor mid-dictation, hiding the button.
+  useEffect(() => {
+    if (composerEditorUnavailable) cancelVoiceInput();
+  }, [cancelVoiceInput, composerEditorUnavailable]);
+
+  // The frozen editor drops focus; hand it back once voice input settles.
+  const voiceInputWasFrozenRef = useRef(false);
+  useEffect(() => {
+    const wasFrozen = voiceInputWasFrozenRef.current;
+    voiceInputWasFrozenRef.current = voiceInputFrozen;
+    if (wasFrozen && !voiceInputFrozen) composerEditorRef.current?.focusAt(composerCursor);
+  }, [composerCursor, voiceInputFrozen]);
+
+  const voiceInputError = voiceInput.state.phase === "error" ? voiceInput.state.error : null;
+  const voiceInputErrorAction = voiceInput.state.errorAction;
+  useEffect(() => {
+    if (!voiceInputError) return;
+    toastManager.add({
+      type: "error",
+      title: voiceInputError,
+      ...(voiceInputErrorAction === "settings"
+        ? { description: "Allow microphone access for T3 Code in your browser or system settings." }
+        : {}),
+    });
+  }, [voiceInputError, voiceInputErrorAction]);
 
   const resolveActiveComposerTrigger = useCallback((): {
     snapshot: { value: string; cursor: number; expandedCursor: number };
@@ -6563,6 +6639,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       },
       compactContext: compactThreadContext,
       isModelPickerOpen: () => isComposerModelPickerOpen,
+      toggleVoiceInput: () => {
+        if (showVoiceInputAction || voiceInputFrozen) toggleVoiceInput();
+      },
+      isVoiceInputActive: () => voiceInputFrozen,
       isCaretAtStart: () => {
         const range = composerEditorRef.current?.readSelectionRange();
         return range !== undefined && range.start === 0 && range.end === 0;
@@ -6696,6 +6776,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       isComposerModelPickerOpen,
       openModelPicker,
       readComposerSnapshot,
+      showVoiceInputAction,
+      toggleVoiceInput,
+      voiceInputFrozen,
       resetComposerTrigger,
       setComposerTrigger,
       selectedModel,
@@ -7605,13 +7688,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                   ? DISCONNECTED_COMPOSER_PLACEHOLDER
                                   : "Ask anything, @tag files/folders, $use skills, or / for commands"
                     }
-                    disabled={
-                      isConnecting ||
-                      isComposerApprovalState ||
-                      projectSelectionRequired ||
-                      isChoiceOnlyPendingQuestion ||
-                      activePendingIsResponding
-                    }
+                    disabled={composerEditorUnavailable || voiceInputFrozen}
                   />
                 </ComposerContextActionsContext>
                 {isComposerResting ? collapsedComposerImagePreviews : null}
@@ -7726,6 +7803,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         <TooltipPopup>Attach files</TooltipPopup>
                       </Tooltip>
                     </>
+                  ) : null}
+                  {showVoiceInputAction ? (
+                    <ComposerVoiceInputButton
+                      state={voiceInput.state}
+                      modelDownload={voiceInput.modelDownload}
+                      shortcutLabel={shortcutLabelForCommand(
+                        keybindings,
+                        "composer.toggleVoiceInput",
+                        { context: { composerFocus: true } },
+                      )}
+                      onToggle={toggleVoiceInput}
+                    />
                   ) : null}
                   <ComposerFooterPrimaryActions
                     compact={isComposerResting || isComposerPrimaryActionsCompact}

@@ -465,10 +465,35 @@ async function findPackageRoot(
   return null;
 }
 
+/**
+ * The `node_modules` of a package's pnpm virtual store entry, where pnpm links
+ * every dependency it installed for that package.
+ */
+function pnpmVirtualStoreModulesDirectory(packageJsonPath: string): string | null {
+  const segments = packageJsonPath.split(/[\\/]/);
+  const storeIndex = segments.findIndex(
+    (segment, index) => segment === ".pnpm" && segments[index - 1] === "node_modules",
+  );
+  const entry = segments[storeIndex + 1];
+  if (storeIndex === -1 || entry === undefined || entry === "node_modules") return null;
+  return [...segments.slice(0, storeIndex + 2), "node_modules"].join(NodePath.sep);
+}
+
 async function resolveDependencyPackage(
   dependencyName: string,
   fromPackageJsonPath: string,
 ): Promise<{ readonly packageJson: PackageJson; readonly packageRoot: string } | null> {
+  // A dependency missing from the virtual store entry was not installed for this
+  // package, e.g. a pnpm override removed it. It can still resolve through
+  // pnpm's hidden hoist when another workspace installs it, so stop here.
+  const storeModulesDirectory = pnpmVirtualStoreModulesDirectory(fromPackageJsonPath);
+  if (storeModulesDirectory !== null) {
+    try {
+      await NodeFSP.access(NodePath.join(storeModulesDirectory, dependencyName));
+    } catch {
+      return null;
+    }
+  }
   const requireFromPackage = NodeModule.createRequire(fromPackageJsonPath);
   const candidates = [`${dependencyName}/package.json`, dependencyName];
   for (const candidate of candidates) {
