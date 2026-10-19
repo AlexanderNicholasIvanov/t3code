@@ -129,6 +129,23 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
   },
 ];
 
+// New default commands that share a shortcut with an earlier default and must
+// win while their `when` holds. Backfill puts new rules first so persisted
+// rules keep priority, which would leave the earlier default in charge. While
+// a config still holds that default untouched, startup appends the rule after
+// it instead, once, so the config resolves like a fresh one.
+const OUTRANKING_DEFAULT_KEYBINDINGS: ReadonlyArray<{
+  readonly id: string;
+  readonly outranks: KeybindingRule;
+  readonly rule: KeybindingRule;
+}> = [
+  {
+    id: "composer.toggleVoiceInput:mod+d",
+    outranks: { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+    rule: { key: "mod+d", command: "composer.toggleVoiceInput", when: "composerFocus" },
+  },
+];
+
 function keybindingShortcutContext(rule: KeybindingRule): string | null {
   const parsed = parseKeybindingShortcut(rule.key);
   if (!parsed) return null;
@@ -506,13 +523,17 @@ const make = Effect.gen(function* () {
       const pendingLateDefaults = LATE_DEFAULT_KEYBINDINGS.filter(
         (late) => !appliedMigrationIds.has(late.id),
       );
+      const pendingOutrankingDefaults = OUTRANKING_DEFAULT_KEYBINDINGS.filter(
+        (outranking) => !appliedMigrationIds.has(outranking.id),
+      );
       const configExists = yield* readConfigExists;
       if (!configExists) {
         yield* writeConfigAtomically(DEFAULT_KEYBINDINGS);
-        if (pendingLateDefaults.length > 0) {
+        if (pendingLateDefaults.length > 0 || pendingOutrankingDefaults.length > 0) {
           yield* recordAppliedMigrations([
             ...appliedMigrationIds,
             ...LATE_DEFAULT_KEYBINDINGS.map((late) => late.id),
+            ...OUTRANKING_DEFAULT_KEYBINDINGS.map((outranking) => outranking.id),
           ]);
         }
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
@@ -533,6 +554,11 @@ const make = Effect.gen(function* () {
       }
       const customConfig = runtimeConfig.keybindings;
       const existingCommands = new Set(customConfig.map((entry) => entry.command));
+      const outrankingDefaults = pendingOutrankingDefaults.filter(
+        ({ outranks, rule }) =>
+          !existingCommands.has(rule.command) &&
+          customConfig.some((entry) => isSameKeybindingRule(entry, outranks)),
+      );
       const missingDefaults: KeybindingRule[] = [];
       const shortcutConflictWarnings: Array<{
         defaultCommand: KeybindingRule["command"];
@@ -541,7 +567,10 @@ const make = Effect.gen(function* () {
         when: string | null;
       }> = [];
       for (const defaultRule of DEFAULT_KEYBINDINGS) {
-        if (existingCommands.has(defaultRule.command)) {
+        if (
+          existingCommands.has(defaultRule.command) ||
+          outrankingDefaults.some(({ rule }) => isSameKeybindingRule(rule, defaultRule))
+        ) {
           continue;
         }
         const conflictingEntry = customConfig.find((entry) =>
@@ -597,6 +626,12 @@ const make = Effect.gen(function* () {
       const availableSlots = Math.max(0, MAX_KEYBINDINGS_COUNT - customConfig.length);
       const defaultsToAppend = missingDefaults.slice(0, availableSlots);
       const skippedDefaults = missingDefaults.slice(availableSlots);
+      const outrankingToInsert = outrankingDefaults.slice(
+        0,
+        Math.max(0, availableSlots - defaultsToAppend.length),
+      );
+      const skippedOutrankingDefaults = outrankingDefaults.slice(outrankingToInsert.length);
+      skippedDefaults.push(...skippedOutrankingDefaults.map(({ rule }) => rule));
       if (skippedDefaults.length > 0) {
         yield* Effect.logWarning("skipping default keybinding backfill at max entries", {
           path: keybindingsConfigPath,
@@ -604,18 +639,26 @@ const make = Effect.gen(function* () {
           commands: skippedDefaults.map((rule) => rule.command),
         });
       }
-      if (defaultsToAppend.length > 0) {
-        yield* writeConfigAtomically([...defaultsToAppend, ...customConfig]);
-      }
-      // A late default skipped at max entries stays pending for a later start.
-      const settledLateDefaults = pendingLateDefaults.filter(
-        (late) => !skippedDefaults.includes(late.rule),
-      );
-      if (settledLateDefaults.length > 0) {
-        yield* recordAppliedMigrations([
-          ...appliedMigrationIds,
-          ...settledLateDefaults.map((late) => late.id),
+      if (defaultsToAppend.length > 0 || outrankingToInsert.length > 0) {
+        yield* writeConfigAtomically([
+          ...defaultsToAppend,
+          ...customConfig.flatMap((entry) => [
+            entry,
+            ...outrankingToInsert
+              .filter(({ outranks }) => isSameKeybindingRule(entry, outranks))
+              .map(({ rule }) => rule),
+          ]),
         ]);
+      }
+      // A late or outranking default skipped at max entries stays pending for a later start.
+      const settledMigrationIds = [
+        ...pendingLateDefaults.filter((late) => !skippedDefaults.includes(late.rule)),
+        ...pendingOutrankingDefaults.filter(
+          (outranking) => !skippedDefaults.includes(outranking.rule),
+        ),
+      ].map((migration) => migration.id);
+      if (settledMigrationIds.length > 0) {
+        yield* recordAppliedMigrations([...appliedMigrationIds, ...settledMigrationIds]);
       }
       yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
     }),

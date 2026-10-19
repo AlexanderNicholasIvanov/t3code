@@ -114,6 +114,10 @@ describe("electron development launcher", () => {
       values.NSDocumentsFolderUsageDescription,
       "T3 Code reads project files you open in the desktop app.",
     );
+    assert.equal(
+      values.NSMicrophoneUsageDescription,
+      "T3 Code listens while you dictate a message.",
+    );
   });
 
   it("ad-hoc signs the complete development app bundle", () => {

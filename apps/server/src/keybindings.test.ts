@@ -364,6 +364,62 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(layerKeybindings())),
   );
 
+  it.effect("places an outranking default after the untouched default it shadows", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const keybindings = yield* Keybindings.Keybindings;
+      const diffToggle = { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" } as const;
+      const voiceInput = {
+        key: "mod+d",
+        command: "composer.toggleVoiceInput",
+        when: "composerFocus",
+      } as const;
+      const later = { key: "mod+shift+y", command: "terminal.toggle" } as const;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [diffToggle, later]);
+
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepStrictEqual(persisted.slice(-3), [diffToggle, voiceInput, later]);
+      // Resolution takes the last matching rule, so voice input wins in the composer.
+      const resolvedCommands = (yield* keybindings.loadConfigState).keybindings.map(
+        (entry) => entry.command,
+      );
+      assert.isAbove(
+        resolvedCommands.lastIndexOf("composer.toggleVoiceInput"),
+        resolvedCommands.lastIndexOf("diff.toggle"),
+      );
+
+      // Later startups backfill a removed rule like any default, without outranking again.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [diffToggle]);
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const backfilled = (yield* readKeybindingsConfig(keybindingsConfigPath)).map(
+        (entry) => entry.command,
+      );
+      assert.isBelow(
+        backfilled.indexOf("composer.toggleVoiceInput"),
+        backfilled.indexOf("diff.toggle"),
+      );
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
+  it.effect("keeps a customized shortcut ahead of an outranking default", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const keybindings = yield* Keybindings.Keybindings;
+      const customDiff = { key: "mod+d", command: "diff.toggle" } as const;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [customDiff]);
+
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      const voiceIndex = persisted.findIndex(
+        (entry) => entry.command === "composer.toggleVoiceInput",
+      );
+      assert.isAtLeast(voiceIndex, 0);
+      assert.isBelow(voiceIndex, persisted.length - 1);
+      assert.deepStrictEqual(persisted.at(-1), customDiff);
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
   it.effect("skips conflicting default keybindings on startup and logs a detailed warning", () => {
     const messages: string[] = [];
     const logger = Logger.make(({ message }) => {
