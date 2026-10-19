@@ -1,7 +1,9 @@
 # Keybindings
 
 Customize shortcuts in **Settings → Keybindings** on web and desktop. That page
-also lists the command IDs and defaults available in your version.
+also lists the command IDs and defaults available in your version. Click a
+shortcut and press the new keys; it saves as soon as you press them, and you can
+change it again at any time. Typed keys and condition edits save with **Save**.
 
 ## Composer controls
 

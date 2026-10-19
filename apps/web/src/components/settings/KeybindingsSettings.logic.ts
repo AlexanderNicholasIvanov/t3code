@@ -5,6 +5,8 @@ import {
   type KeybindingWhenNode,
   type ResolvedKeybindingRule,
   type ResolvedKeybindingsConfig,
+  type ServerRemoveKeybindingInput,
+  type ServerUpsertKeybindingInput,
 } from "@t3tools/contracts";
 import {
   DEFAULT_RESOLVED_KEYBINDINGS,
@@ -246,6 +248,32 @@ export function groupKeybindingRows(
     const groupRows = rowsByGroup.get(group.id);
     return groupRows ? [{ id: group.id, title: group.title, rows: groupRows }] : [];
   });
+}
+
+/** Identifies the saved binding behind a row, for replacing or removing it. */
+export function rowKeybindingTarget(row: KeybindingRow): ServerRemoveKeybindingInput {
+  return {
+    command: row.command,
+    key: row.key,
+    ...(row.when.trim().length > 0 ? { when: row.when } : {}),
+  };
+}
+
+/** Saves a row's edited shortcut in place of its current one; null when there is nothing to save. */
+export function keybindingRowUpsert(
+  row: KeybindingRow,
+  key: string,
+  when: string,
+): ServerUpsertKeybindingInput | null {
+  const nextKey = key.trim();
+  const nextWhen = when.trim();
+  if (nextKey.length === 0 || (nextKey === row.key && nextWhen === row.when)) return null;
+  return {
+    command: row.command,
+    key: nextKey,
+    ...(nextWhen.length > 0 ? { when: nextWhen } : {}),
+    replace: rowKeybindingTarget(row),
+  };
 }
 
 export function buildKeybindingRows(
