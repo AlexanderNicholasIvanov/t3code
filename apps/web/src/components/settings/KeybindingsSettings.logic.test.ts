@@ -10,6 +10,7 @@ import {
   groupKeybindingRows,
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
+  keybindingRowUpsert,
   parseWhenExpressionDraft,
   shortcutToKeybindingInput,
   unknownWhenVariables,
@@ -59,6 +60,19 @@ describe("KeybindingsSettings.logic", () => {
       );
     },
   );
+  it("replaces the voice input shortcut with a newly pressed one, keeping its condition", () => {
+    const [row] = buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, "voice input");
+    expect(row).toMatchObject({ command: "composer.toggleVoiceInput", key: "mod+d" });
+
+    expect(keybindingRowUpsert(row!, "mod+shift+v", row!.when)).toEqual({
+      command: "composer.toggleVoiceInput",
+      key: "mod+shift+v",
+      when: "composerFocus",
+      replace: { command: "composer.toggleVoiceInput", key: "mod+d", when: "composerFocus" },
+    });
+    expect(keybindingRowUpsert(row!, "mod+d", row!.when)).toBeNull();
+    expect(keybindingRowUpsert(row!, " ", row!.when)).toBeNull();
+  });
   it("groups rows by command area in page order and drops empty groups", () => {
     const groups = groupKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, ""));
     expect(groups.map((group) => group.title)).toEqual([

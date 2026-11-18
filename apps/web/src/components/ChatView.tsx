@@ -8017,7 +8017,10 @@ export default function ChatView(props: ChatViewProps) {
       previewOpen: previewPanelOpen,
       editableFocus: isEditableFocused(eventTarget),
       modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
-      composerFocus: document.activeElement?.getAttribute("data-testid") === "composer-editor",
+      // Dictation freezes the editor, so it loses focus; its shortcut still has to stop it.
+      composerFocus:
+        document.activeElement?.getAttribute("data-testid") === "composer-editor" ||
+        (composerRef.current?.isVoiceInputActive() ?? false),
       draftThreadRoute: routeKind === "draft",
       turnRunning: phase === "running",
       isWeb: !isElectron,
@@ -8241,6 +8244,13 @@ export default function ChatView(props: ChatViewProps) {
         event.preventDefault();
         event.stopPropagation();
         onToggleDiff();
+        return;
+      }
+
+      if (command === "composer.toggleVoiceInput") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) composerRef.current?.toggleVoiceInput();
         return;
       }
 

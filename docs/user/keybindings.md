@@ -1,7 +1,9 @@
 # Keybindings
 
 Customize shortcuts in **Settings → Keybindings** on web and desktop. That page
-also lists the command IDs and defaults available in your version.
+also lists the command IDs and defaults available in your version. Click a
+shortcut and press the new keys; it saves as soon as you press them, and you can
+change it again at any time. Typed keys and condition edits save with **Save**.
 
 ## Composer controls
 
@@ -28,6 +30,10 @@ Use `mod+shift+e` for effort, `mod+shift+a` for access mode, `mod+shift+x` for t
 workspace, and `mod+shift+g` for the Git branch. The workspace menu includes the
 current checkout, a new worktree, and the previous worktree when available.
 Use `mod+shift+l` to reuse the previous worktree directly.
+
+While the composer is focused, `mod+d` starts and stops
+[voice input](./composer.md#voice-input-on-web-and-desktop) instead of toggling the
+diff panel.
 
 In the model picker, press Left in an empty search field or Shift+Tab to reach
 the provider list. Use Up/Down to move and Enter to choose. Right returns to

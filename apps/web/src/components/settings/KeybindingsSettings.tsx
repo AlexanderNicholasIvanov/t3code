@@ -27,7 +27,6 @@ import {
   AuthSettingsWriteScope,
   type KeybindingCommand,
   type KeybindingWhenNode,
-  type ServerRemoveKeybindingInput,
   type ServerUpsertKeybindingInput,
 } from "@t3tools/contracts";
 import { mergeWithDefaultKeybindings } from "@t3tools/shared/keybindings";
@@ -61,7 +60,9 @@ import {
   isKnownWhenVariable,
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
+  keybindingRowUpsert,
   parseWhenExpressionDraft,
+  rowKeybindingTarget,
   groupKeybindingRows,
   type KeybindingCommandOption,
   type KeybindingGroup,
@@ -704,14 +705,6 @@ function keybindingRowDraftReducer(
   return { ...state, ...patch };
 }
 
-function rowKeybindingTarget(row: KeybindingRow): ServerRemoveKeybindingInput {
-  return {
-    command: row.command,
-    key: row.key,
-    ...(row.when.trim().length > 0 ? { when: row.when } : {}),
-  };
-}
-
 /** Draft state and actions for editing one existing binding; layouts decide how to render it. */
 function useKeybindingRowEditor({
   row,
@@ -733,12 +726,8 @@ function useKeybindingRowEditor({
   });
 
   const save = () => {
-    onSave({
-      command: row.command,
-      key: keyDraft,
-      when: whenDraftExpression.trim().length > 0 ? whenDraftExpression : undefined,
-      replace: rowKeybindingTarget(row),
-    });
+    const input = keybindingRowUpsert(row, keyDraft, whenDraftExpression);
+    if (input) onSave(input);
   };
 
   const captureKeybinding = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -752,6 +741,11 @@ function useKeybindingRowEditor({
     const next = keybindingFromKeyboardEvent(event.nativeEvent, navigator.platform);
     if (!next) return;
     setDraft({ keyDraft: next, isRecording: false });
+    // A pressed shortcut is complete, so it saves at once. Typed keys and
+    // condition edits still wait for Save.
+    if (!isWhenDraftValid) return;
+    const input = keybindingRowUpsert(row, next, whenDraftExpression);
+    if (input) onSave(input);
   };
 
   return {

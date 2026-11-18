@@ -167,6 +167,23 @@ Stashes containing uploaded files must be restored in their original environment
 Those files are retained for 24 hours. After an upload expires, restore the prompt
 and use **Attach again** or remove the missing file before sending.
 
+## Voice input on web and desktop
+
+Click the composer's microphone, or press `mod+d` while the composer is focused, to
+start dictating. Click it or press the shortcut again to stop. The text is inserted
+where your cursor was when you started, ready for you to review before sending.
+Outside the composer, `mod+d` still toggles the diff panel. Change the shortcut
+under **Composer: Toggle Voice Input** in **Settings → Keybindings**.
+
+The first use downloads a speech model of about 80 MB, which your browser caches
+for later sessions. Transcription then runs on your device, even offline, and only
+the message text is sent when you submit. Recording stops and transcribes after
+five minutes. Switching threads discards a recording in progress.
+
+Your browser or the desktop app asks for microphone access the first time. If you
+blocked it, allow microphone access for T3 Code in your browser's site settings or,
+on macOS, in **System Settings → Privacy & Security → Microphone**.
+
 ## Voice input on iPhone
 
 On supported iPhones with iOS 26 or later, use the composer's microphone to record,
